@@ -9,3 +9,28 @@ menu "Example Configuration"
 
 endmenu
 
+menu "Debugging"
+    config BLE_SHELL_DEBUGGING_ENCRYPTED
+        bool "Enable BLE shell debugging (encrypted)"
+        default n
+        help
+          Adds a BLE UART-style console service that requires LE pairing.
+
+    config BLE_CONSOLE_REQUIRE_BOND
+        bool "Require bonded peer (not just encrypted) for BLE console"
+        default y
+        depends on BLE_SHELL_DEBUGGING_ENCRYPTED
+        help
+          When enabled (default), the console rejects access unless the peer
+          is both encrypted AND bonded. If disabled, encrypted-but-unbonded
+          peers are allowed.
+
+    config BLE_CONSOLE_RATE_LIMIT
+        bool "Enable TX rate limiter for BLE console notifications"
+        default y
+        depends on BLE_SHELL_DEBUGGING_ENCRYPTED
+        help
+          When enabled (default), outgoing notify traffic is throttled to
+          avoid starving Matter/NimBLE. Tuned conservatively for ESP32-C3.
+endmenu
+

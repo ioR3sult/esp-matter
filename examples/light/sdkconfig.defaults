@@ -40,6 +40,9 @@ CONFIG_ENABLE_OTA_REQUESTOR=y
 # Enable HKDF in mbedtls
 CONFIG_MBEDTLS_HKDF_C=y
 
+# BLE console feature (disabled by default)
+# CONFIG_BLE_SHELL_DEBUGGING_ENCRYPTED is not set
+
 # Increase LwIP IPv6 address number to 6 (MAX_FABRIC + 1)
 # unique local addresses for fabrics(MAX_FABRIC), a link local address(1)
 CONFIG_LWIP_IPV6_NUM_ADDRESSES=6

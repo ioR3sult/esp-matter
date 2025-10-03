@@ -37,6 +37,10 @@
 using namespace chip::DeviceLayer;
 #endif
 
+#if CONFIG_BLE_SHELL_DEBUGGING_ENCRYPTED
+#include "debug_console.h"
+#endif
+
 static const char *TAG = "app_main";
 uint16_t light_endpoint_id = 0;
 
@@ -139,6 +143,34 @@ static void app_event_cb(const ChipDeviceEvent *event, intptr_t arg)
         break;
     }
 }
+
+#if CONFIG_BLE_SHELL_DEBUGGING_ENCRYPTED
+static void ble_console_event_handler(const ChipDeviceEvent *event, intptr_t arg)
+{
+    (void)arg;
+    switch (event->Type) {
+    case chip::DeviceLayer::DeviceEventType::kCommissioningComplete:
+    case chip::DeviceLayer::DeviceEventType::kCommissioningWindowClosed:
+        ESP_LOGI(TAG, "Commissioning window closed - starting BLE console ADV");
+        debug_console_start_adv();
+        break;
+    case chip::DeviceLayer::DeviceEventType::kCommissioningWindowOpened:
+    case chip::DeviceLayer::DeviceEventType::kFailSafeTimerArmed:
+        ESP_LOGI(TAG, "Commissioning window opened - stopping BLE console ADV");
+        debug_console_stop_adv();
+        if (debug_console_is_connected()) {
+            ESP_LOGI(TAG, "Disconnecting active BLE console session");
+        }
+        break;
+    case chip::DeviceLayer::DeviceEventType::kFabricRemoved:
+        ESP_LOGI(TAG, "Fabric removed - stopping BLE console");
+        debug_console_stop_adv();
+        break;
+    default:
+        break;
+    }
+}
+#endif
 
 // This callback is invoked when clients interact with the Identify Cluster.
 // In the callback implementation, an endpoint can identify itself. (e.g., by flashing an LED or light).
@@ -252,6 +284,16 @@ extern "C" void app_main()
 
     /* Starting driver with default values */
     app_driver_light_set_defaults(light_endpoint_id);
+
+#if CONFIG_BLE_SHELL_DEBUGGING_ENCRYPTED
+    esp_err_t ble_err = debug_console_init();
+    if (ble_err == ESP_OK) {
+        ESP_LOGI(TAG, "BLE console initialized (encrypted)");
+        chip::DeviceLayer::PlatformMgr().AddEventHandler(ble_console_event_handler, 0);
+    } else {
+        ESP_LOGE(TAG, "Failed to initialize BLE console: %d", ble_err);
+    }
+#endif
 
 #if CONFIG_ENABLE_ENCRYPTED_OTA
     err = esp_matter_ota_requestor_encrypted_init(s_decryption_key, s_decryption_key_len);
