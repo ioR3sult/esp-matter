@@ -205,11 +205,15 @@ esp_err_t chip_stack_unlock()
 #ifdef CONFIG_ESP_MATTER_ENABLE_MATTER_SERVER
 static void deinit_ble_if_commissioned(intptr_t unused)
 {
+#if CONFIG_BLE_SHELL_DEBUGGING_ENCRYPTED
+    ESP_LOGI(TAG, "BLE kept alive (console feature enabled)");
+#else
 #if CONFIG_USE_BLE_ONLY_FOR_COMMISSIONING
     if(chip::Server::GetInstance().GetFabricTable().FabricCount() > 0) {
         chip::DeviceLayer::Internal::BLEMgr().Shutdown();
     }
 #endif /* CONFIG_USE_BLE_ONLY_FOR_COMMISSIONING */
+#endif /* CONFIG_BLE_SHELL_DEBUGGING_ENCRYPTED */
 }
 
 static void esp_matter_chip_init_task(intptr_t context)
