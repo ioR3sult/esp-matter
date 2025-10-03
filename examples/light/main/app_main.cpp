@@ -290,6 +290,18 @@ extern "C" void app_main()
     if (ble_err == ESP_OK) {
         ESP_LOGI(TAG, "BLE console initialized (encrypted)");
         chip::DeviceLayer::PlatformMgr().AddEventHandler(ble_console_event_handler, 0);
+        
+        if (chip::Server::GetInstance().GetFabricTable().FabricCount() > 0) {
+            chip::CommissioningWindowManager & commissionMgr = chip::Server::GetInstance().GetCommissioningWindowManager();
+            if (!commissionMgr.IsCommissioningWindowOpen()) {
+                ESP_LOGI(TAG, "Device already commissioned and window closed - starting BLE console ADV");
+                debug_console_start_adv();
+            } else {
+                ESP_LOGI(TAG, "Device commissioned but commissioning window is open - console will start when window closes");
+            }
+        } else {
+            ESP_LOGI(TAG, "Device not commissioned yet - console will start after commissioning completes");
+        }
     } else {
         ESP_LOGE(TAG, "Failed to initialize BLE console: %d", ble_err);
     }
