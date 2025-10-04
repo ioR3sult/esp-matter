@@ -28,8 +28,17 @@ static bool     g_encrypted = false;   /* link encryption state */
 static bool     g_bonded    = false;   /* peer bonding state */
 
 /* Defaults come from Kconfig (both ON by default) */
-static bool     s_require_bond = CONFIG_BLE_CONSOLE_REQUIRE_BOND;
-static bool     s_rate_limit   = CONFIG_BLE_CONSOLE_RATE_LIMIT;
+#ifdef CONFIG_BLE_CONSOLE_REQUIRE_BOND
+static bool     s_require_bond = true;
+#else
+static bool     s_require_bond = false;
+#endif
+
+#ifdef CONFIG_BLE_CONSOLE_RATE_LIMIT
+static bool     s_rate_limit = true;
+#else
+static bool     s_rate_limit = false;
+#endif
 
 static bool     s_dbg_inited = false;
 
