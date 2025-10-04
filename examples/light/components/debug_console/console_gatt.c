@@ -24,7 +24,11 @@ extern int debug_console_gatt_access_tx(uint16_t conn_handle, uint16_t attr_hand
 
 static const struct ble_gatt_chr_def kConsoleChrs[] = {
     { .uuid=&UUID_RX.u, .access_cb=debug_console_gatt_access_rx,
+#ifdef CONFIG_DEBUG_CONSOLE_GATT_ENCRYPTED
+      .flags=BLE_GATT_CHR_F_WRITE | BLE_GATT_CHR_F_WRITE_NO_RSP | BLE_GATT_CHR_F_WRITE_ENC,
+#else
       .flags=BLE_GATT_CHR_F_WRITE | BLE_GATT_CHR_F_WRITE_NO_RSP,
+#endif
       .val_handle=&g_rx_val_handle },
     { .uuid=&UUID_TX.u, .access_cb=debug_console_gatt_access_tx,
       .flags=BLE_GATT_CHR_F_READ | BLE_GATT_CHR_F_INDICATE,

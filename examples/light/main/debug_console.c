@@ -107,6 +107,7 @@ int debug_console_gatt_access_rx(uint16_t conn_handle, uint16_t attr_handle,
     ESP_LOGI(TAG, "ASCII: \"%s\"", asc);
     
     /* Enforce encryption (and, by default, bonding) on RX writes */
+#ifdef CONFIG_DEBUG_CONSOLE_GATT_ENCRYPTED
     if (!g_encrypted) {
         ESP_LOGW(TAG, "RX write rejected: not encrypted");
         return BLE_ATT_ERR_INSUFFICIENT_ENC;
@@ -115,6 +116,7 @@ int debug_console_gatt_access_rx(uint16_t conn_handle, uint16_t attr_handle,
         ESP_LOGW(TAG, "RX write rejected: not bonded (require_bond=%d)", (int)s_require_bond);
         return BLE_ATT_ERR_INSUFFICIENT_AUTHEN;
     }
+#endif
     
     if (g_ind_subscribed) {
         struct os_mbuf *om = ble_hs_mbuf_from_flat(buf, len);
@@ -267,11 +269,21 @@ static int gap_event(struct ble_gap_event *ev, void *arg)
         break;
         
     case BLE_GAP_EVENT_PASSKEY_ACTION:
+#ifdef CONFIG_DEBUG_CONSOLE_GATT_ENCRYPTED
         if (ev->passkey.params.action == BLE_SM_IOACT_DISP) {
             ESP_LOGI(TAG, "=== Passkey: %06lu ===", (unsigned long)ev->passkey.params.numcmp);
             struct ble_sm_io io = {.action = BLE_SM_IOACT_DISP, .passkey = ev->passkey.params.numcmp};
             ble_sm_inject_io(ev->passkey.conn_handle, &io);
+        } else if (ev->passkey.params.action == BLE_SM_IOACT_NUMCMP) {
+            ESP_LOGI(TAG, "Numeric compare: %06lu -> accepting", (unsigned long)ev->passkey.params.numcmp);
+            ble_sm_inject_io(ev->passkey.conn_handle, &(struct ble_sm_io){.action = BLE_SM_IOACT_NUMCMP, .numcmp_accept = 1});
         }
+#endif
+        break;
+        
+    case BLE_GAP_EVENT_NOTIFY_TX:
+        ESP_LOGI(TAG, "NOTIFY_TX status=%d indication=%d",
+                 ev->notify_tx.status, ev->notify_tx.indication);
         break;
         
     default:
@@ -295,11 +307,6 @@ esp_err_t debug_console_init(void)
     }
     
     ensure_host_ready();
-    
-    ble_hs_cfg.sm_bonding = 1;
-    ble_hs_cfg.sm_mitm = 1;
-    ble_hs_cfg.sm_sc = 1;
-    ble_hs_cfg.sm_io_cap = BLE_HS_IO_DISPLAY_YESNO;
     
     ESP_RETURN_ON_ERROR(console_bridge_init(), TAG, "bridge init failed");
     console_bridge_set_log_mirror(false);
