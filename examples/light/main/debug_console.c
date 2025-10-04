@@ -21,6 +21,7 @@ static const ble_uuid128_t UUID_RX  = BLE_UUID128_INIT(0x9e, 0xca, 0xdc, 0x24, 0
 static const ble_uuid128_t UUID_TX  = BLE_UUID128_INIT(0x9e, 0xca, 0xdc, 0x24, 0x0e, 0xe5, 0xa9, 0xe0, 0x93, 0xf3, 0xa3, 0xb5, 0x03, 0x00, 0x40, 0x6e);
 
 /* GATT handles */
+static uint16_t g_rx_val_handle = 0;
 static uint16_t g_tx_val_handle = 0;
 static uint16_t g_conn_handle = BLE_HS_CONN_HANDLE_NONE;
 static bool     g_notify_enabled = false;
@@ -85,28 +86,6 @@ static void dump_hex(const uint8_t *p, int len)
     }
 }
 
-/* Immediate echo helper (no newline needed) */
-static void echo_now(const uint8_t *data, int len)
-{
-    if (!g_ind_subscribed) {
-        ESP_LOGW(TAG, "echo skipped: not subscribed");
-        return;
-    }
-    if (!data || len <= 0) return;
-    
-    struct os_mbuf *om = ble_hs_mbuf_from_flat(data, len);
-    if (!om) {
-        ESP_LOGE(TAG, "echo: mbuf alloc failed");
-        return;
-    }
-    
-    int rc = ble_gatts_notify_custom(g_conn_handle, g_tx_val_handle, om);
-    if (rc != 0) {
-        os_mbuf_free_chain(om);
-    }
-    ESP_LOGI(TAG, "echo: notify rc=%d (len=%d)", rc, len);
-}
-
 /* GATT service definition */
 static const struct ble_gatt_svc_def g_svcs[] = {
     {
@@ -117,6 +96,7 @@ static const struct ble_gatt_svc_def g_svcs[] = {
                 .uuid = &UUID_RX.u,
                 .access_cb = gatt_access_rx,
                 .flags = BLE_GATT_CHR_F_WRITE | BLE_GATT_CHR_F_WRITE_NO_RSP | BLE_GATT_CHR_F_WRITE_ENC,
+                .val_handle = &g_rx_val_handle,
             },
             {
                 .uuid = &UUID_TX.u,
@@ -133,20 +113,10 @@ static const struct ble_gatt_svc_def g_svcs[] = {
 static int gatt_access_rx(uint16_t conn_handle, uint16_t attr_handle,
                           struct ble_gatt_access_ctxt *ctxt, void *arg)
 {
-    (void)conn_handle; (void)attr_handle; (void)arg;
+    (void)arg;
     
     if (ctxt->op != BLE_GATT_ACCESS_OP_WRITE_CHR) {
         return 0;
-    }
-    
-    /* Enforce encryption (and, by default, bonding) on RX writes */
-    if (!g_encrypted) {
-        ESP_LOGW(TAG, "RX write rejected: not encrypted");
-        return BLE_ATT_ERR_INSUFFICIENT_ENC;
-    }
-    if (s_require_bond && !g_bonded) {
-        ESP_LOGW(TAG, "RX write rejected: not bonded (require_bond=%d)", (int)s_require_bond);
-        return BLE_ATT_ERR_INSUFFICIENT_AUTHEN;
     }
     
     /* Read flat data from mbuf */
@@ -162,7 +132,7 @@ static int gatt_access_rx(uint16_t conn_handle, uint16_t attr_handle,
     }
     
     /* Verbose logging: hexdump + ASCII */
-    ESP_LOGI(TAG, "RX WRITE len=%d", len);
+    ESP_LOGI(TAG, "RX WRITE on handle=%u len=%d (expect RX=%u)", attr_handle, len, g_rx_val_handle);
     dump_hex(buf, len);
     
     /* ASCII representation (best effort) */
@@ -172,8 +142,31 @@ static int gatt_access_rx(uint16_t conn_handle, uint16_t attr_handle,
     asc[alen] = 0;
     ESP_LOGI(TAG, "ASCII: \"%s\"", asc);
     
-    /* Immediate echo (proves RX->TX round-trip) */
-    echo_now(buf, len);
+    /* Enforce encryption (and, by default, bonding) on RX writes */
+    if (!g_encrypted) {
+        ESP_LOGW(TAG, "RX write rejected: not encrypted");
+        return BLE_ATT_ERR_INSUFFICIENT_ENC;
+    }
+    if (s_require_bond && !g_bonded) {
+        ESP_LOGW(TAG, "RX write rejected: not bonded (require_bond=%d)", (int)s_require_bond);
+        return BLE_ATT_ERR_INSUFFICIENT_AUTHEN;
+    }
+    
+    /* Immediate echo (only if subscribed) */
+    if (g_ind_subscribed) {
+        struct os_mbuf *om = ble_hs_mbuf_from_flat(buf, len);
+        if (om) {
+            int echo_rc = ble_gatts_indicate_custom(conn_handle, g_tx_val_handle, om);
+            if (echo_rc != 0) {
+                os_mbuf_free_chain(om);
+            }
+            ESP_LOGI(TAG, "echo indicate rc=%d", echo_rc);
+        } else {
+            ESP_LOGE(TAG, "echo: mbuf alloc failed");
+        }
+    } else {
+        ESP_LOGW(TAG, "no subscriber; skipping echo");
+    }
     
     /* Forward to console bridge for line assembly + command processing */
     uint16_t copied = 0;
@@ -267,32 +260,23 @@ static int gap_event(struct ble_gap_event *ev, void *arg)
         break;
         
     case BLE_GAP_EVENT_SUBSCRIBE:
-        ESP_LOGI(TAG, "SUBSCRIBE: attr=%u notify=%d->%d indicate=%d->%d",
-                 ev->subscribe.attr_handle,
-                 ev->subscribe.prev_notify, ev->subscribe.cur_notify,
-                 ev->subscribe.prev_indicate, ev->subscribe.cur_indicate);
+        g_ind_subscribed = ev->subscribe.cur_indicate || ev->subscribe.cur_notify;
+        g_notify_enabled = g_ind_subscribed && g_encrypted && (!s_require_bond || g_bonded);
         
-        if (ev->subscribe.attr_handle == g_tx_val_handle) {
-            g_ind_subscribed = ev->subscribe.cur_indicate || ev->subscribe.cur_notify;
-            g_notify_enabled = g_ind_subscribed && g_encrypted && (!s_require_bond || g_bonded);
-            
-            ESP_LOGI(TAG, "TX char subscription: %s (enc=%d bond=%d require_bond=%d)",
-                     g_ind_subscribed ? "ENABLED" : "DISABLED",
-                     (int)g_encrypted, (int)g_bonded, (int)s_require_bond);
-            
-            /* Send test indication to prove TX path works */
-            if (g_ind_subscribed) {
-                static const uint8_t pong[] = "pong\r\n";
-                struct os_mbuf *om = ble_hs_mbuf_from_flat(pong, sizeof(pong) - 1);
-                if (om) {
-                    int rc = ble_gatts_notify_custom(g_conn_handle, g_tx_val_handle, om);
-                    if (rc != 0) {
-                        os_mbuf_free_chain(om);
-                    }
-                    ESP_LOGI(TAG, "test notify 'pong' rc=%d", rc);
-                } else {
-                    ESP_LOGE(TAG, "test notify: mbuf alloc failed");
+        ESP_LOGI(TAG, "SUBSCRIBE: attr=%u -> ind=%d", ev->subscribe.attr_handle, g_ind_subscribed);
+        
+        /* Send test indication to prove TX path works */
+        if (g_ind_subscribed) {
+            static const uint8_t pong[] = "pong\r\n";
+            struct os_mbuf *om = ble_hs_mbuf_from_flat(pong, sizeof(pong) - 1);
+            if (om) {
+                int rc = ble_gatts_indicate_custom(g_conn_handle, g_tx_val_handle, om);
+                if (rc != 0) {
+                    os_mbuf_free_chain(om);
                 }
+                ESP_LOGI(TAG, "test indicate rc=%d (tx_handle=%u)", rc, g_tx_val_handle);
+            } else {
+                ESP_LOGE(TAG, "test indicate: mbuf alloc failed");
             }
         }
         break;
@@ -360,7 +344,7 @@ esp_err_t debug_console_init(void)
     ESP_RETURN_ON_FALSE(rc==0, ESP_FAIL, TAG, "count_cfg=%d", rc);
     rc = ble_gatts_add_svcs(g_svcs);     
     ESP_RETURN_ON_FALSE(rc==0, ESP_FAIL, TAG, "add_svcs=%d", rc);
-    ESP_LOGI(TAG, "GATT service registered (tx_handle=%u)", g_tx_val_handle);
+    ESP_LOGI(TAG, "Handles: RX=%u TX=%u", g_rx_val_handle, g_tx_val_handle);
 
     /* Bring up the bridge (line assembler + vprintf mirror) */
     ESP_RETURN_ON_ERROR(console_bridge_init(), TAG, "bridge init failed");
