@@ -28,6 +28,7 @@ static bool     g_notify_enabled = false;
 static bool     g_ind_subscribed = false;  /* subscription state for TX char */
 static bool     g_encrypted = false;   /* link encryption state */
 static bool     g_bonded    = false;   /* peer bonding state */
+static bool     s_console_registered = false;  /* GATT service registration state */
 
 /* Defaults come from Kconfig (both ON by default) */
 #ifdef CONFIG_BLE_CONSOLE_REQUIRE_BOND
@@ -327,6 +328,40 @@ static void ensure_host_ready(void)
     }
 }
 
+/* Dynamic GATT service registration (called after host is up, no count_cfg) */
+static int console_register_now(void)
+{
+    if (s_console_registered) {
+        ESP_LOGI(TAG, "Console service already registered; skip");
+        return 0;
+    }
+    
+    /* IMPORTANT: Do NOT call ble_gatts_count_cfg() - invalid for dynamic (post-init) registration */
+    int rc = ble_gatts_add_svcs(kConsoleSvc);
+    ESP_LOGI(TAG, "add_svcs rc=%d", rc);
+    if (rc != 0) {
+        ESP_LOGE(TAG, "add_svcs failed rc=%d", rc);
+        return rc;
+    }
+    
+    rc = ble_gatts_start();
+    ESP_LOGI(TAG, "gatts_start rc=%d", rc);
+    if (rc != 0) {
+        ESP_LOGE(TAG, "gatts_start failed rc=%d", rc);
+        return rc;
+    }
+    
+    ESP_LOGI(TAG, "Handles: RX=%u TX=%u", g_rx_val_handle, g_tx_val_handle);
+    if (g_rx_val_handle == 0 || g_tx_val_handle == 0) {
+        ESP_LOGE(TAG, "Invalid val handles (RX/TX); registration failed");
+        return BLE_HS_EINVAL;
+    }
+    
+    s_console_registered = true;
+    ESP_LOGI(TAG, "Console GATT service registered successfully");
+    return 0;
+}
+
 esp_err_t debug_console_init(void)
 {
     if (s_dbg_inited) {
@@ -342,22 +377,14 @@ esp_err_t debug_console_init(void)
     ble_hs_cfg.sm_sc = 1;
     ble_hs_cfg.sm_io_cap = BLE_HS_IO_DISPLAY_YESNO;
     
-    int rc = 0;
-    rc = ble_gatts_count_cfg(kConsoleSvc);
-    ESP_LOGI(TAG, "count_cfg rc=%d", rc);
-    ESP_RETURN_ON_FALSE(rc==0, ESP_FAIL, TAG, "count_cfg failed");
+    /* Optional delay to avoid racing immediately after host is ready */
+    vTaskDelay(pdMS_TO_TICKS(10));
     
-    rc = ble_gatts_add_svcs(kConsoleSvc);
-    ESP_LOGI(TAG, "add_svcs rc=%d", rc);
-    ESP_RETURN_ON_FALSE(rc==0, ESP_FAIL, TAG, "add_svcs failed");
-    
-    rc = ble_gatts_start();
-    ESP_LOGI(TAG, "gatts_start rc=%d", rc);
-    ESP_RETURN_ON_FALSE(rc==0, ESP_FAIL, TAG, "gatts_start failed");
-    
-    ESP_LOGI(TAG, "Handles: RX=%u TX=%u", g_rx_val_handle, g_tx_val_handle);
-    if (g_rx_val_handle == 0 || g_tx_val_handle == 0) {
-        ESP_LOGE(TAG, "Invalid val handles (RX/TX); aborting");
+    /* Register GATT service dynamically (no count_cfg for post-init registration) */
+    int rc = console_register_now();
+    ESP_LOGI(TAG, "console register rc=%d", rc);
+    if (rc != 0) {
+        ESP_LOGE(TAG, "Console GATT registration failed rc=%d", rc);
         return ESP_FAIL;
     }
 
