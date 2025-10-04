@@ -14,6 +14,7 @@ esp_err_t debug_console_init(void);
 esp_err_t debug_console_start_adv(void);
 esp_err_t debug_console_stop_adv(void);
 bool      debug_console_is_connected(void);
+bool      debug_console_is_initialized(void);
 
 /* --- Bridge glue (console_bridge.c <-> debug_console.c) --- */
 
@@ -42,6 +43,7 @@ static inline esp_err_t debug_console_init(void) { return ESP_OK; }
 static inline esp_err_t debug_console_start_adv(void) { return ESP_OK; }
 static inline esp_err_t debug_console_stop_adv(void) { return ESP_OK; }
 static inline bool      debug_console_is_connected(void) { return false; }
+static inline bool      debug_console_is_initialized(void) { return false; }
 
 #endif
 

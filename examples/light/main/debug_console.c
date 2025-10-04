@@ -31,6 +31,8 @@ static bool     g_bonded    = false;   /* peer bonding state */
 static bool     s_require_bond = CONFIG_BLE_CONSOLE_REQUIRE_BOND;
 static bool     s_rate_limit   = CONFIG_BLE_CONSOLE_RATE_LIMIT;
 
+static bool     s_dbg_inited = false;
+
 /* Simple token bucket rate limiter (notifications per 100ms window) */
 #define DC_RATE_WINDOW_US   (100000)   /* 100ms */
 #define DC_RATE_TOKENS_MAX  (20)       /* up to ~200 notif/s burst-ish */
@@ -228,6 +230,11 @@ static void ensure_host_ready(void)
 
 esp_err_t debug_console_init(void)
 {
+    if (s_dbg_inited) {
+        ESP_LOGW(TAG, "BLE console already initialized");
+        return ESP_OK;
+    }
+    
     ensure_host_ready();
     
     /* Configure Security Manager for encryption + bonding + MITM */
@@ -247,6 +254,8 @@ esp_err_t debug_console_init(void)
     ESP_RETURN_ON_ERROR(console_bridge_init(), TAG, "bridge init failed");
     /* Start with logs mirroring OFF; user can enable via 'logs on' */
     console_bridge_set_log_mirror(false);
+    
+    s_dbg_inited = true;
     return ESP_OK;
 }
 
@@ -310,6 +319,11 @@ esp_err_t debug_console_stop_adv(void)
 bool debug_console_is_connected(void)
 {
     return g_conn_handle != BLE_HS_CONN_HANDLE_NONE;
+}
+
+bool debug_console_is_initialized(void)
+{
+    return s_dbg_inited;
 }
 
 void debug_console_set_require_bond(bool enable) { s_require_bond = enable; }
