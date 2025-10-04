@@ -214,7 +214,7 @@ extern "C" void app_main()
 
     /* Crank up logging for BLE console debugging */
     esp_log_level_set("*", ESP_LOG_INFO);
-    esp_log_level_set("dbg_console", ESP_LOG_VERBOSE);
+    esp_log_level_set("dbg_console", ESP_LOG_DEBUG);
     esp_log_level_set("NimBLE", ESP_LOG_DEBUG);
 
     /* Initialize the ESP NVS layer */
