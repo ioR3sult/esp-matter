@@ -24,6 +24,7 @@ static const ble_uuid128_t UUID_TX  = BLE_UUID128_INIT(0x9e, 0xca, 0xdc, 0x24, 0
 static uint16_t g_tx_val_handle = 0;
 static uint16_t g_conn_handle = BLE_HS_CONN_HANDLE_NONE;
 static bool     g_notify_enabled = false;
+static bool     g_ind_subscribed = false;  /* subscription state for TX char */
 static bool     g_encrypted = false;   /* link encryption state */
 static bool     g_bonded    = false;   /* peer bonding state */
 
@@ -69,6 +70,43 @@ static int gatt_access_tx(uint16_t conn_handle, uint16_t attr_handle,
 static int gap_event(struct ble_gap_event *ev, void *arg);
 static void ensure_host_ready(void);
 
+/* Hexdump helper for verbose logging */
+static void dump_hex(const uint8_t *p, int len)
+{
+    if (!p || len <= 0) return;
+    char line[80];
+    int o = 0;
+    for (int i = 0; i < len; i++) {
+        o += snprintf(line + o, sizeof(line) - o, "%02X ", p[i]);
+        if ((i % 16) == 15 || i == len - 1) {
+            ESP_LOGV(TAG, "HEX: %s", line);
+            o = 0;
+        }
+    }
+}
+
+/* Immediate echo helper (no newline needed) */
+static void echo_now(const uint8_t *data, int len)
+{
+    if (!g_ind_subscribed) {
+        ESP_LOGW(TAG, "echo skipped: not subscribed");
+        return;
+    }
+    if (!data || len <= 0) return;
+    
+    struct os_mbuf *om = ble_hs_mbuf_from_flat(data, len);
+    if (!om) {
+        ESP_LOGE(TAG, "echo: mbuf alloc failed");
+        return;
+    }
+    
+    int rc = ble_gatts_notify_custom(g_conn_handle, g_tx_val_handle, om);
+    if (rc != 0) {
+        os_mbuf_free_chain(om);
+    }
+    ESP_LOGI(TAG, "echo: notify rc=%d (len=%d)", rc, len);
+}
+
 /* GATT service definition */
 static const struct ble_gatt_svc_def g_svcs[] = {
     {
@@ -84,7 +122,7 @@ static const struct ble_gatt_svc_def g_svcs[] = {
                 .uuid = &UUID_TX.u,
                 .access_cb = gatt_access_tx,
                 .val_handle = &g_tx_val_handle,
-                .flags = BLE_GATT_CHR_F_NOTIFY | BLE_GATT_CHR_F_READ_ENC,
+                .flags = BLE_GATT_CHR_F_NOTIFY | BLE_GATT_CHR_F_INDICATE | BLE_GATT_CHR_F_READ_ENC,
             },
             {0}
         },
@@ -96,26 +134,58 @@ static int gatt_access_rx(uint16_t conn_handle, uint16_t attr_handle,
                           struct ble_gatt_access_ctxt *ctxt, void *arg)
 {
     (void)conn_handle; (void)attr_handle; (void)arg;
+    
+    if (ctxt->op != BLE_GATT_ACCESS_OP_WRITE_CHR) {
+        return 0;
+    }
+    
     /* Enforce encryption (and, by default, bonding) on RX writes */
     if (!g_encrypted) {
+        ESP_LOGW(TAG, "RX write rejected: not encrypted");
         return BLE_ATT_ERR_INSUFFICIENT_ENC;
     }
     if (s_require_bond && !g_bonded) {
+        ESP_LOGW(TAG, "RX write rejected: not bonded (require_bond=%d)", (int)s_require_bond);
         return BLE_ATT_ERR_INSUFFICIENT_AUTHEN;
     }
-    /* Read flat data from mbuf and forward to bridge */
+    
+    /* Read flat data from mbuf */
     uint16_t total = OS_MBUF_PKTLEN(ctxt->om);
-    uint8_t  buf[128];
+    uint8_t buf[244];
+    int len = total;
+    if (len > sizeof(buf)) len = sizeof(buf);
+    
+    int rc = os_mbuf_copydata(ctxt->om, 0, len, buf);
+    if (rc != 0) {
+        ESP_LOGE(TAG, "RX: mbuf_copydata failed rc=%d", rc);
+        return BLE_ATT_ERR_UNLIKELY;
+    }
+    
+    /* Verbose logging: hexdump + ASCII */
+    ESP_LOGI(TAG, "RX WRITE len=%d", len);
+    dump_hex(buf, len);
+    
+    /* ASCII representation (best effort) */
+    char asc[245];
+    int alen = len < 244 ? len : 244;
+    memcpy(asc, buf, alen);
+    asc[alen] = 0;
+    ESP_LOGI(TAG, "ASCII: \"%s\"", asc);
+    
+    /* Immediate echo (proves RX->TX round-trip) */
+    echo_now(buf, len);
+    
+    /* Forward to console bridge for line assembly + command processing */
     uint16_t copied = 0;
-
     while (copied < total) {
         uint16_t chunk = total - copied;
         if (chunk > sizeof(buf)) chunk = sizeof(buf);
-        int rc = os_mbuf_copydata(ctxt->om, copied, chunk, buf);
+        rc = os_mbuf_copydata(ctxt->om, copied, chunk, buf);
         if (rc != 0) break;
         console_bridge_feed_rx(buf, chunk);
         copied += chunk;
     }
+    
     return 0;
 }
 
@@ -169,12 +239,13 @@ static int gap_event(struct ble_gap_event *ev, void *arg)
     case BLE_GAP_EVENT_CONNECT:
         if (ev->connect.status == 0) {
             g_conn_handle = ev->connect.conn_handle;
-            ESP_LOGI(TAG, "Connected (handle=%d)", g_conn_handle);
+            ESP_LOGI(TAG, "CONNECT status=%d handle=%d", ev->connect.status, g_conn_handle);
             /* Query current security state and cache encryption flag */
             struct ble_gap_conn_desc d;
             if (ble_gap_conn_find(g_conn_handle, &d) == 0) {
                 g_encrypted = d.sec_state.encrypted;
                 g_bonded    = d.sec_state.bonded;
+                ESP_LOGI(TAG, "Connection security: enc=%d bond=%d", (int)g_encrypted, (int)g_bonded);
             } else {
                 g_encrypted = false;
                 g_bonded    = false;
@@ -184,20 +255,48 @@ static int gap_event(struct ble_gap_event *ev, void *arg)
             debug_console_start_adv();
         }
         break;
+        
     case BLE_GAP_EVENT_DISCONNECT:
-        ESP_LOGI(TAG, "Disconnected (reason=%d)", ev->disconnect.reason);
+        ESP_LOGI(TAG, "DISCONNECT reason=0x%02X", ev->disconnect.reason);
         g_conn_handle = BLE_HS_CONN_HANDLE_NONE;
         g_notify_enabled = false;
+        g_ind_subscribed = false;
         g_encrypted = false;
         g_bonded    = false;
         debug_console_start_adv();
         break;
+        
     case BLE_GAP_EVENT_SUBSCRIBE:
-        g_notify_enabled = ev->subscribe.cur_notify && g_encrypted && (!s_require_bond || g_bonded);
-        ESP_LOGI(TAG, "Notify %s (enc=%d, bond=%d, require_bond=%d)",
-                 g_notify_enabled ? "ENABLED" : "DISABLED",
-                 (int)g_encrypted, (int)g_bonded, (int)s_require_bond);
+        ESP_LOGI(TAG, "SUBSCRIBE: attr=%u notify=%d->%d indicate=%d->%d",
+                 ev->subscribe.attr_handle,
+                 ev->subscribe.prev_notify, ev->subscribe.cur_notify,
+                 ev->subscribe.prev_indicate, ev->subscribe.cur_indicate);
+        
+        if (ev->subscribe.attr_handle == g_tx_val_handle) {
+            g_ind_subscribed = ev->subscribe.cur_indicate || ev->subscribe.cur_notify;
+            g_notify_enabled = g_ind_subscribed && g_encrypted && (!s_require_bond || g_bonded);
+            
+            ESP_LOGI(TAG, "TX char subscription: %s (enc=%d bond=%d require_bond=%d)",
+                     g_ind_subscribed ? "ENABLED" : "DISABLED",
+                     (int)g_encrypted, (int)g_bonded, (int)s_require_bond);
+            
+            /* Send test indication to prove TX path works */
+            if (g_ind_subscribed) {
+                static const uint8_t pong[] = "pong\r\n";
+                struct os_mbuf *om = ble_hs_mbuf_from_flat(pong, sizeof(pong) - 1);
+                if (om) {
+                    int rc = ble_gatts_notify_custom(g_conn_handle, g_tx_val_handle, om);
+                    if (rc != 0) {
+                        os_mbuf_free_chain(om);
+                    }
+                    ESP_LOGI(TAG, "test notify 'pong' rc=%d", rc);
+                } else {
+                    ESP_LOGE(TAG, "test notify: mbuf alloc failed");
+                }
+            }
+        }
         break;
+        
     case BLE_GAP_EVENT_ENC_CHANGE:
         /* Check encryption status from connection descriptor */
         { struct ble_gap_conn_desc d;
@@ -212,11 +311,14 @@ static int gap_event(struct ble_gap_event *ev, void *arg)
         ESP_LOGI(TAG, "Security: enc=%d bond=%d (require_bond=%d)", (int)g_encrypted, (int)g_bonded, (int)s_require_bond);
         if (!g_encrypted) {
             g_notify_enabled = false;
+            g_ind_subscribed = false;
         }
         break;
+        
     case BLE_GAP_EVENT_MTU:
         ESP_LOGI(TAG, "MTU update: %d", ev->mtu.value);
         break;
+        
     case BLE_GAP_EVENT_PASSKEY_ACTION:
         if (ev->passkey.params.action == BLE_SM_IOACT_DISP) {
             ESP_LOGI(TAG, "=== Passkey: %06lu ===", (unsigned long)ev->passkey.params.numcmp);
@@ -224,6 +326,7 @@ static int gap_event(struct ble_gap_event *ev, void *arg)
             ble_sm_inject_io(ev->passkey.conn_handle, &io);
         }
         break;
+        
     default:
         break;
     }

@@ -212,6 +212,11 @@ extern "C" void app_main()
 {
     esp_err_t err = ESP_OK;
 
+    /* Crank up logging for BLE console debugging */
+    esp_log_level_set("*", ESP_LOG_INFO);
+    esp_log_level_set("dbg_console", ESP_LOG_VERBOSE);
+    esp_log_level_set("NimBLE", ESP_LOG_DEBUG);
+
     /* Initialize the ESP NVS layer */
     nvs_flash_init();
 
