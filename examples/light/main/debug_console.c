@@ -1,9 +1,11 @@
+#include "sdkconfig.h"
+
 #if CONFIG_BLE_SHELL_DEBUGGING_ENCRYPTED
 
 #include <string.h>
 #include "esp_log.h"
 #include "esp_check.h"
-#include "esp_efuse.h"
+#include "esp_mac.h"
 #include "host/ble_hs.h"
 #include "host/ble_uuid.h"
 #include "host/ble_gap.h"
@@ -139,7 +141,7 @@ void debug_console_notify(const uint8_t *data, size_t len)
             os_mbuf_free_chain(om);
             break;
         }
-        int rc = ble_gatts_notify(g_conn_handle, g_tx_val_handle, om);
+        int rc = ble_gatts_notify_custom(g_conn_handle, g_tx_val_handle, om);
         if (rc != 0) {
             os_mbuf_free_chain(om);
             break;
@@ -186,10 +188,16 @@ static int gap_event(struct ble_gap_event *ev, void *arg)
                  (int)g_encrypted, (int)g_bonded, (int)s_require_bond);
         break;
     case BLE_GAP_EVENT_ENC_CHANGE:
-        g_encrypted = (ev->enc_change.status == 0) && ev->enc_change.encrypted;
-        /* Refresh full conn desc to read 'bonded' flag too */
+        /* Check encryption status from connection descriptor */
         { struct ble_gap_conn_desc d;
-          if (ble_gap_conn_find(g_conn_handle, &d) == 0) g_bonded = d.sec_state.bonded; }
+          if (ble_gap_conn_find(g_conn_handle, &d) == 0) {
+              g_encrypted = d.sec_state.encrypted;
+              g_bonded = d.sec_state.bonded;
+          } else {
+              g_encrypted = false;
+              g_bonded = false;
+          }
+        }
         ESP_LOGI(TAG, "Security: enc=%d bond=%d (require_bond=%d)", (int)g_encrypted, (int)g_bonded, (int)s_require_bond);
         if (!g_encrypted) {
             g_notify_enabled = false;

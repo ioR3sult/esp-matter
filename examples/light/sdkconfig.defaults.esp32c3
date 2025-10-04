@@ -1,4 +1,5 @@
 CONFIG_IDF_TARGET="esp32c3"
+CONFIG_ESP32C3_REV_MIN_101=y
 
 # ESP32-C3-DevKitC-02 Settings
 # Buttons

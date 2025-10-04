@@ -1,3 +1,5 @@
+#include "sdkconfig.h"
+
 #if CONFIG_BLE_SHELL_DEBUGGING_ENCRYPTED
 
 #include <stdarg.h>
