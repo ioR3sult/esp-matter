@@ -261,41 +261,59 @@ esp_err_t debug_console_init(void)
 
 esp_err_t debug_console_start_adv(void)
 {
-    struct ble_gap_adv_params ap = {0};
-    ap.conn_mode = BLE_GAP_CONN_MODE_UND;
-    ap.disc_mode = BLE_GAP_DISC_MODE_GEN;
-
+    ensure_host_ready();
+    
     /* Get MAC address for device name suffix */
     uint8_t mac[6];
     esp_efuse_mac_get_default(mac);
     char name[17];
     snprintf(name, sizeof(name), "LIGHT-DBG-%02X%02X", mac[4], mac[5]);
 
-    uint8_t adv[31]; 
-    uint8_t len = 0;
-    /* Flags */
-    adv[len++] = 2; 
-    adv[len++] = BLE_HS_ADV_TYPE_FLAGS; 
-    adv[len++] = BLE_HS_ADV_F_DISC_GEN | BLE_HS_ADV_F_BREDR_UNSUP;
-    /* Name (complete) */
-    uint8_t nlen = (uint8_t)strlen(name);
-    adv[len++] = nlen + 1; 
-    adv[len++] = BLE_HS_ADV_TYPE_COMP_NAME; 
-    memcpy(&adv[len], name, nlen); 
-    len += nlen;
-    /* 128-bit UUID (complete list) */
-    uint8_t ulen = 16;
-    adv[len++] = ulen + 1; 
-    adv[len++] = BLE_HS_ADV_TYPE_COMP_UUIDS128;
-    memcpy(&adv[len], UUID_SVC.value, ulen); 
-    len += ulen;
+    /* 1) Use GENERAL discoverable + no-BR/EDR flags in ADV data */
+    uint8_t adv[31], adv_len = 0;
+    adv[adv_len++] = 2; 
+    adv[adv_len++] = BLE_HS_ADV_TYPE_FLAGS;
+    adv[adv_len++] = BLE_HS_ADV_F_DISC_GEN | BLE_HS_ADV_F_BREDR_UNSUP;
+    
+    /* 2) Include 128-bit Service UUID in ADV (not only SR) */
+    adv[adv_len++] = 17; 
+    adv[adv_len++] = BLE_HS_ADV_TYPE_COMP_UUIDS128;
+    memcpy(&adv[adv_len], UUID_SVC.value, 16); 
+    adv_len += 16;
+    
+    ble_gap_adv_set_data(adv, adv_len);
 
-    ble_gap_adv_set_data(adv, len);
-    int rc = ble_gap_adv_start(BLE_OWN_ADDR_PUBLIC, NULL, BLE_HS_FOREVER, &ap, gap_event, NULL);
+    /* 3) Put the device name in Scan Response */
+    uint8_t sr[31], sr_len = 0;
+    uint8_t nlen = (uint8_t)strlen(name);
+    sr[sr_len++] = nlen + 1;
+    sr[sr_len++] = BLE_HS_ADV_TYPE_COMP_NAME;
+    memcpy(&sr[sr_len], name, nlen); 
+    sr_len += nlen;
+    
+    ble_gap_adv_rsp_set_data(sr, sr_len);
+
+    /* 4) Sensible params, connectable + general discovery */
+    struct ble_gap_adv_params ap = {0};
+    ap.conn_mode = BLE_GAP_CONN_MODE_UND;
+    ap.disc_mode = BLE_GAP_DISC_MODE_GEN;
+    ap.itvl_min = 0x00A0;  /* 100 ms interval */
+    ap.itvl_max = 0x00A0;  /* 100 ms interval */
+    ap.channel_map = 0x07; /* All channels */
+
+    /* 5) Try RANDOM first (falls back to PUBLIC if needed) */
+    int rc = ble_gap_adv_start(BLE_OWN_ADDR_RANDOM, NULL, BLE_HS_FOREVER, &ap, gap_event, NULL);
     if (rc) {
-        ESP_LOGE(TAG, "adv_start rc=%d", rc);
+        ESP_LOGW(TAG, "adv_start RANDOM rc=%d, retrying PUBLIC", rc);
+        rc = ble_gap_adv_start(BLE_OWN_ADDR_PUBLIC, NULL, BLE_HS_FOREVER, &ap, gap_event, NULL);
+    }
+    ESP_LOGI(TAG, "adv_start rc=%d", rc);
+    
+    if (rc) {
+        ESP_LOGE(TAG, "adv_start failed rc=%d", rc);
         return ESP_FAIL;
     }
+    
     ESP_LOGI(TAG, "Advertising (console) as %s", name);
     return ESP_OK;
 }
