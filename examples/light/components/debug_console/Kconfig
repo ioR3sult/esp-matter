@@ -2,7 +2,7 @@ menu "Debug Console (GATT)"
 
 config DEBUG_CONSOLE_GATT
     bool "Enable Debug Console over BLE GATT"
-    default y
+    default n
     help
       Enable the BLE GATT-based debug console for remote shell access.
       This console uses a custom 128-bit UUID service for RX/TX characteristics.

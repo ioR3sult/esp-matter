@@ -8,7 +8,7 @@ This component provides a BLE GATT-based debug console for ESP-Matter projects.
 
 The console can operate in two modes:
 
-**Encrypted Mode** (default, recommended for production):
+**Encrypted Mode** (recommended for production):
 ```
 CONFIG_DEBUG_CONSOLE_GATT=y
 CONFIG_DEBUG_CONSOLE_GATT_ENCRYPTED=y
@@ -19,6 +19,8 @@ CONFIG_DEBUG_CONSOLE_GATT_ENCRYPTED=y
 CONFIG_DEBUG_CONSOLE_GATT=y
 CONFIG_DEBUG_CONSOLE_GATT_ENCRYPTED=n
 ```
+
+Note: CONFIG_DEBUG_CONSOLE_GATT defaults to `n` for production safety. Enable explicitly via menuconfig when needed.
 
 Use `idf.py menuconfig` → "Debug Console (GATT)" to configure.
 
@@ -53,11 +55,12 @@ I (xxx) DeviceLayer: gatt_init: gatts_start rc=0
 I (xxx) dbg_console: Console GATT registered=1 RX=<handle> TX=<handle>
 ```
 
-During pairing:
+During pairing and subscription:
 ```
 I (xxx) dbg_console: Numeric compare: 123456 -> accepting
-I (xxx) SM: Security: enc=1 bond=1 (require_bond=1)
-I (xxx) dbg_console: SUBSCRIBE: attr=<handle> -> ind=1
+I (xxx) dbg_console: ENC_CHANGE status=0 encrypted=1 bonded=1
+I (xxx) dbg_console: SUBSCRIBE: attr=<handle> -> notify=0 indicate=1
+I (xxx) dbg_console: console online
 ```
 
 ## Security Notes
@@ -82,8 +85,9 @@ I (xxx) dbg_console: SUBSCRIBE: attr=<handle> -> ind=1
 | Test | Expected Behavior |
 |------|------------------|
 | First write to RX | Triggers pairing, numeric comparison visible |
-| After pairing | `ENC_CHANGE encrypted=1 bonded=1` logged |
-| Subscribe to TX | `SUBSCRIBE notify=1` or `indicate=1` logged |
+| After pairing | `ENC_CHANGE status=0 encrypted=1 bonded=1` logged |
+| Subscribe to TX | `SUBSCRIBE: attr=X -> notify=0 indicate=1` logged |
+| TX self-test | "console online" message sent after subscription |
 | TX path | Indications/notifications delivered |
 | Reboot + reconnect | No pairing prompt, RX writes work immediately |
 
@@ -111,8 +115,9 @@ I (xxx) dbg_console: SUBSCRIBE: attr=<handle> -> ind=1
 - Ensure GATT services registered successfully (check handles are non-zero)
 
 **RX writes fail after pairing:**
-- Check encryption state: `Security: enc=1 bond=1`
-- Verify subscription: `SUBSCRIBE: attr=X -> ind=1`
+- Check encryption state: `ENC_CHANGE status=0 encrypted=1 bonded=1`
+- Verify subscription: `SUBSCRIBE: attr=X -> notify=0 indicate=1`
+- Look for "console online" self-test message
 - Check MTU negotiation completed
 
 **Bond not persisting:**

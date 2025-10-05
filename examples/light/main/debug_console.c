@@ -228,20 +228,21 @@ static int gap_event(struct ble_gap_event *ev, void *arg)
         g_ind_subscribed = ev->subscribe.cur_indicate || ev->subscribe.cur_notify;
         g_notify_enabled = g_ind_subscribed && g_encrypted && (!s_require_bond || g_bonded);
         
-        ESP_LOGI(TAG, "SUBSCRIBE: attr=%u -> ind=%d", ev->subscribe.attr_handle, g_ind_subscribed);
+        ESP_LOGI(TAG, "SUBSCRIBE: attr=%u -> notify=%d indicate=%d", 
+                 ev->subscribe.attr_handle, ev->subscribe.cur_notify, ev->subscribe.cur_indicate);
         
-        /* Send test indication to prove TX path works */
+        /* Send self-test message once TX is subscribed */
         if (g_ind_subscribed) {
-            static const uint8_t pong[] = "pong\r\n";
-            struct os_mbuf *om = ble_hs_mbuf_from_flat(pong, sizeof(pong) - 1);
+            static const uint8_t online[] = "console online\r\n";
+            struct os_mbuf *om = ble_hs_mbuf_from_flat(online, sizeof(online) - 1);
             if (om) {
                 int rc = ble_gatts_indicate_custom(g_conn_handle, dbg_console_tx_handle(), om);
                 if (rc != 0) {
                     os_mbuf_free_chain(om);
                 }
-                ESP_LOGI(TAG, "test indicate rc=%d (tx_handle=%u)", rc, dbg_console_tx_handle());
+                ESP_LOGI(TAG, "self-test indicate rc=%d (tx_handle=%u)", rc, dbg_console_tx_handle());
             } else {
-                ESP_LOGE(TAG, "test indicate: mbuf alloc failed");
+                ESP_LOGE(TAG, "self-test indicate: mbuf alloc failed");
             }
         }
         break;
@@ -257,7 +258,8 @@ static int gap_event(struct ble_gap_event *ev, void *arg)
               g_bonded = false;
           }
         }
-        ESP_LOGI(TAG, "Security: enc=%d bond=%d (require_bond=%d)", (int)g_encrypted, (int)g_bonded, (int)s_require_bond);
+        ESP_LOGI(TAG, "ENC_CHANGE status=%d encrypted=%d bonded=%d", 
+                 ev->enc_change.status, (int)g_encrypted, (int)g_bonded);
         if (!g_encrypted) {
             g_notify_enabled = false;
             g_ind_subscribed = false;
