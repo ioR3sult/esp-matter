@@ -4,5 +4,5 @@ idf_component_register(
     PRIV_REQUIRES 
         esp_matter
         chip
-        nimble
+        bt
 )
