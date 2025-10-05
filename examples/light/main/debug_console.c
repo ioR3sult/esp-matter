@@ -15,10 +15,10 @@
 
 static const char *TAG = "dbg_console";
 
-/* Nordic UART Service UUIDs */
-static const ble_uuid128_t UUID_SVC = BLE_UUID128_INIT(0x9e, 0xca, 0xdc, 0x24, 0x0e, 0xe5, 0xa9, 0xe0, 0x93, 0xf3, 0xa3, 0xb5, 0x01, 0x00, 0x40, 0x6e);
-static const ble_uuid128_t UUID_RX  = BLE_UUID128_INIT(0x9e, 0xca, 0xdc, 0x24, 0x0e, 0xe5, 0xa9, 0xe0, 0x93, 0xf3, 0xa3, 0xb5, 0x02, 0x00, 0x40, 0x6e);
-static const ble_uuid128_t UUID_TX  = BLE_UUID128_INIT(0x9e, 0xca, 0xdc, 0x24, 0x0e, 0xe5, 0xa9, 0xe0, 0x93, 0xf3, 0xa3, 0xb5, 0x03, 0x00, 0x40, 0x6e);
+/* Custom BLE Console Service UUIDs: 18EE2EF5-263D-4559-959F-4F9C29F99D10/D11/D12 */
+static const ble_uuid128_t UUID_SVC = BLE_UUID128_INIT(0x10,0x9D,0x9F,0x29,0x9C,0x4F,0x9F,0x95,0x59,0x45,0x3D,0x26,0xF5,0x2E,0xEE,0x18);
+static const ble_uuid128_t UUID_RX  = BLE_UUID128_INIT(0x11,0x9D,0x9F,0x29,0x9C,0x4F,0x9F,0x95,0x59,0x45,0x3D,0x26,0xF5,0x2E,0xEE,0x18);
+static const ble_uuid128_t UUID_TX  = BLE_UUID128_INIT(0x12,0x9D,0x9F,0x29,0x9C,0x4F,0x9F,0x95,0x59,0x45,0x3D,0x26,0xF5,0x2E,0xEE,0x18);
 
 /* GATT handles */
 static uint16_t g_rx_val_handle = 0;
@@ -86,26 +86,29 @@ static void dump_hex(const uint8_t *p, int len)
     }
 }
 
+/* GATT characteristics definition */
+static const struct ble_gatt_chr_def kConsoleChrs[] = {
+    {
+        .uuid = &UUID_RX.u,
+        .access_cb = gatt_access_rx,
+        .flags = BLE_GATT_CHR_F_WRITE | BLE_GATT_CHR_F_WRITE_NO_RSP,
+        .val_handle = &g_rx_val_handle,
+    },
+    {
+        .uuid = &UUID_TX.u,
+        .access_cb = gatt_access_tx,
+        .val_handle = &g_tx_val_handle,
+        .flags = BLE_GATT_CHR_F_READ | BLE_GATT_CHR_F_INDICATE,
+    },
+    {0}
+};
+
 /* GATT service definition */
-static const struct ble_gatt_svc_def g_svcs[] = {
+static const struct ble_gatt_svc_def kConsoleSvc[] = {
     {
         .type = BLE_GATT_SVC_TYPE_PRIMARY,
         .uuid = &UUID_SVC.u,
-        .characteristics = (struct ble_gatt_chr_def[]){
-            {
-                .uuid = &UUID_RX.u,
-                .access_cb = gatt_access_rx,
-                .flags = BLE_GATT_CHR_F_WRITE | BLE_GATT_CHR_F_WRITE_NO_RSP,
-                .val_handle = &g_rx_val_handle,
-            },
-            {
-                .uuid = &UUID_TX.u,
-                .access_cb = gatt_access_tx,
-                .val_handle = &g_tx_val_handle,
-                .flags = BLE_GATT_CHR_F_READ | BLE_GATT_CHR_F_INDICATE,
-            },
-            {0}
-        },
+        .characteristics = kConsoleChrs,
     },
     {0}
 };
@@ -340,10 +343,11 @@ esp_err_t debug_console_init(void)
     ble_hs_cfg.sm_io_cap = BLE_HS_IO_DISPLAY_YESNO;
     
     int rc = 0;
-    rc = ble_gatts_count_cfg(g_svcs);    
-    ESP_RETURN_ON_FALSE(rc==0, ESP_FAIL, TAG, "count_cfg=%d", rc);
+    rc = ble_gatts_count_cfg(kConsoleSvc);
+    ESP_LOGI(TAG, "count_cfg rc=%d", rc);
+    ESP_RETURN_ON_FALSE(rc==0, ESP_FAIL, TAG, "count_cfg failed");
     
-    rc = ble_gatts_add_svcs(g_svcs);
+    rc = ble_gatts_add_svcs(kConsoleSvc);
     ESP_LOGI(TAG, "add_svcs rc=%d", rc);
     ESP_RETURN_ON_FALSE(rc==0, ESP_FAIL, TAG, "add_svcs failed");
     
@@ -352,6 +356,10 @@ esp_err_t debug_console_init(void)
     ESP_RETURN_ON_FALSE(rc==0, ESP_FAIL, TAG, "gatts_start failed");
     
     ESP_LOGI(TAG, "Handles: RX=%u TX=%u", g_rx_val_handle, g_tx_val_handle);
+    if (g_rx_val_handle == 0 || g_tx_val_handle == 0) {
+        ESP_LOGE(TAG, "Invalid val handles (RX/TX); aborting");
+        return ESP_FAIL;
+    }
 
     /* Bring up the bridge (line assembler + vprintf mirror) */
     ESP_RETURN_ON_ERROR(console_bridge_init(), TAG, "bridge init failed");
