@@ -122,11 +122,15 @@ int debug_console_gatt_access_rx(uint16_t conn_handle, uint16_t attr_handle,
     if (g_ind_subscribed) {
         struct os_mbuf *om = ble_hs_mbuf_from_flat(buf, len);
         if (om) {
+#ifdef CONFIG_DEBUG_CONSOLE_GATT_TX_NOTIFY
+            int echo_rc = ble_gatts_notify_custom(conn_handle, dbg_console_tx_handle(), om);
+#else
             int echo_rc = ble_gatts_indicate_custom(conn_handle, dbg_console_tx_handle(), om);
+#endif
             if (echo_rc != 0) {
                 os_mbuf_free_chain(om);
             }
-            ESP_LOGI(TAG, "echo indicate rc=%d", echo_rc);
+            ESP_LOGI(TAG, "echo notify rc=%d", echo_rc);
         } else {
             ESP_LOGE(TAG, "echo: mbuf alloc failed");
         }
@@ -237,13 +241,17 @@ static int gap_event(struct ble_gap_event *ev, void *arg)
             static const uint8_t online[] = "console online\r\n";
             struct os_mbuf *om = ble_hs_mbuf_from_flat(online, sizeof(online) - 1);
             if (om) {
+#ifdef CONFIG_DEBUG_CONSOLE_GATT_TX_NOTIFY
+                int rc = ble_gatts_notify_custom(g_conn_handle, dbg_console_tx_handle(), om);
+#else
                 int rc = ble_gatts_indicate_custom(g_conn_handle, dbg_console_tx_handle(), om);
+#endif
                 if (rc != 0) {
                     os_mbuf_free_chain(om);
                 }
-                ESP_LOGI(TAG, "self-test indicate rc=%d (tx_handle=%u)", rc, dbg_console_tx_handle());
+                ESP_LOGI(TAG, "self-test notify rc=%d (tx_handle=%u)", rc, dbg_console_tx_handle());
             } else {
-                ESP_LOGE(TAG, "self-test indicate: mbuf alloc failed");
+                ESP_LOGE(TAG, "self-test notify: mbuf alloc failed");
             }
             
             ble_console_on_subscribed();
