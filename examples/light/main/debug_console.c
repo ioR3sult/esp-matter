@@ -13,6 +13,7 @@
 #include "services/gatt/ble_svc_gatt.h"
 #include "debug_console.h"
 #include "console_gatt.h"
+#include "console_bridge.h"
 
 static const char *TAG = "dbg_console";
 
@@ -244,6 +245,8 @@ static int gap_event(struct ble_gap_event *ev, void *arg)
             } else {
                 ESP_LOGE(TAG, "self-test indicate: mbuf alloc failed");
             }
+            
+            ble_console_on_subscribed();
         }
         break;
         
@@ -311,7 +314,8 @@ esp_err_t debug_console_init(void)
     ensure_host_ready();
     
     ESP_RETURN_ON_ERROR(console_bridge_init(), TAG, "bridge init failed");
-    console_bridge_set_log_mirror(false);
+    console_install_tee();
+    console_bridge_set_log_mirror(true);
     
     s_dbg_inited = true;
     return ESP_OK;
