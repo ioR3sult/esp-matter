@@ -43,6 +43,7 @@ include(${ESP_MATTER_PATH}/examples/common/cmake_common/components_include.cmake
 include($ENV{ESP_MATTER_DEVICE_PATH}/esp_matter_device.cmake)
 
 set(EXTRA_COMPONENT_DIRS
+    "${CMAKE_SOURCE_DIR}/components"
     "${ESP_MATTER_PATH}/examples/common"
     "${MATTER_SDK_PATH}/config/esp32/components"
     "${ESP_MATTER_PATH}/components"

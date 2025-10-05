@@ -16,6 +16,11 @@ esp_err_t debug_console_stop_adv(void);
 bool      debug_console_is_connected(void);
 bool      debug_console_is_initialized(void);
 
+int debug_console_gatt_access_rx(uint16_t conn_handle, uint16_t attr_handle,
+                                  struct ble_gatt_access_ctxt *ctxt, void *arg);
+int debug_console_gatt_access_tx(uint16_t conn_handle, uint16_t attr_handle,
+                                  struct ble_gatt_access_ctxt *ctxt, void *arg);
+
 /* --- Bridge glue (console_bridge.c <-> debug_console.c) --- */
 
 /* Called by bridge to send bytes out over BLE (will chunk to MTU). */

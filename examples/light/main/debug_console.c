@@ -12,23 +12,17 @@
 #include "services/gap/ble_svc_gap.h"
 #include "services/gatt/ble_svc_gatt.h"
 #include "debug_console.h"
+#include "console_gatt.h"
 
 static const char *TAG = "dbg_console";
 
-/* Custom BLE Console Service UUIDs: 18EE2EF5-263D-4559-959F-4F9C29F99D10/D11/D12 */
-static const ble_uuid128_t UUID_SVC = BLE_UUID128_INIT(0x10,0x9D,0x9F,0x29,0x9C,0x4F,0x9F,0x95,0x59,0x45,0x3D,0x26,0xF5,0x2E,0xEE,0x18);
-static const ble_uuid128_t UUID_RX  = BLE_UUID128_INIT(0x11,0x9D,0x9F,0x29,0x9C,0x4F,0x9F,0x95,0x59,0x45,0x3D,0x26,0xF5,0x2E,0xEE,0x18);
-static const ble_uuid128_t UUID_TX  = BLE_UUID128_INIT(0x12,0x9D,0x9F,0x29,0x9C,0x4F,0x9F,0x95,0x59,0x45,0x3D,0x26,0xF5,0x2E,0xEE,0x18);
+static const ble_uuid128_t UUID_SVC = BLE_UUID128_INIT(0x10,0x9D,0x9F,0x42,0x9C,0x4F,0x9F,0x95,0x59,0x45,0x3D,0x26,0xF5,0x2E,0xEE,0x18);
 
-/* GATT handles */
-static uint16_t g_rx_val_handle = 0;
-static uint16_t g_tx_val_handle = 0;
 static uint16_t g_conn_handle = BLE_HS_CONN_HANDLE_NONE;
 static bool     g_notify_enabled = false;
-static bool     g_ind_subscribed = false;  /* subscription state for TX char */
-static bool     g_encrypted = false;   /* link encryption state */
-static bool     g_bonded    = false;   /* peer bonding state */
-static bool     s_console_registered = false;  /* GATT service registration state */
+static bool     g_ind_subscribed = false;
+static bool     g_encrypted = false;
+static bool     g_bonded    = false;
 
 /* Defaults come from Kconfig (both ON by default) */
 #ifdef CONFIG_BLE_CONSOLE_REQUIRE_BOND
@@ -64,15 +58,9 @@ static inline bool dc_can_send_now(void)
     return true;
 }
 
-/* Forward declarations */
-static int gatt_access_rx(uint16_t conn_handle, uint16_t attr_handle,
-                          struct ble_gatt_access_ctxt *ctxt, void *arg);
-static int gatt_access_tx(uint16_t conn_handle, uint16_t attr_handle,
-                          struct ble_gatt_access_ctxt *ctxt, void *arg);
 static int gap_event(struct ble_gap_event *ev, void *arg);
 static void ensure_host_ready(void);
 
-/* Hexdump helper for verbose logging */
 static void dump_hex(const uint8_t *p, int len)
 {
     if (!p || len <= 0) return;
@@ -87,35 +75,8 @@ static void dump_hex(const uint8_t *p, int len)
     }
 }
 
-/* GATT characteristics definition */
-static const struct ble_gatt_chr_def kConsoleChrs[] = {
-    {
-        .uuid = &UUID_RX.u,
-        .access_cb = gatt_access_rx,
-        .flags = BLE_GATT_CHR_F_WRITE | BLE_GATT_CHR_F_WRITE_NO_RSP,
-        .val_handle = &g_rx_val_handle,
-    },
-    {
-        .uuid = &UUID_TX.u,
-        .access_cb = gatt_access_tx,
-        .val_handle = &g_tx_val_handle,
-        .flags = BLE_GATT_CHR_F_READ | BLE_GATT_CHR_F_INDICATE,
-    },
-    {0}
-};
-
-/* GATT service definition */
-static const struct ble_gatt_svc_def kConsoleSvc[] = {
-    {
-        .type = BLE_GATT_SVC_TYPE_PRIMARY,
-        .uuid = &UUID_SVC.u,
-        .characteristics = kConsoleChrs,
-    },
-    {0}
-};
-
-static int gatt_access_rx(uint16_t conn_handle, uint16_t attr_handle,
-                          struct ble_gatt_access_ctxt *ctxt, void *arg)
+int debug_console_gatt_access_rx(uint16_t conn_handle, uint16_t attr_handle,
+                                   struct ble_gatt_access_ctxt *ctxt, void *arg)
 {
     (void)arg;
     
@@ -135,8 +96,7 @@ static int gatt_access_rx(uint16_t conn_handle, uint16_t attr_handle,
         return BLE_ATT_ERR_UNLIKELY;
     }
     
-    /* Verbose logging: hexdump + ASCII */
-    ESP_LOGI(TAG, "RX WRITE on handle=%u len=%d (expect RX=%u)", attr_handle, len, g_rx_val_handle);
+    ESP_LOGI(TAG, "RX WRITE on handle=%u len=%d (expect RX=%u)", attr_handle, len, dbg_console_rx_handle());
     dump_hex(buf, len);
     
     /* ASCII representation (best effort) */
@@ -156,11 +116,10 @@ static int gatt_access_rx(uint16_t conn_handle, uint16_t attr_handle,
         return BLE_ATT_ERR_INSUFFICIENT_AUTHEN;
     }
     
-    /* Immediate echo (only if subscribed) */
     if (g_ind_subscribed) {
         struct os_mbuf *om = ble_hs_mbuf_from_flat(buf, len);
         if (om) {
-            int echo_rc = ble_gatts_indicate_custom(conn_handle, g_tx_val_handle, om);
+            int echo_rc = ble_gatts_indicate_custom(conn_handle, dbg_console_tx_handle(), om);
             if (echo_rc != 0) {
                 os_mbuf_free_chain(om);
             }
@@ -186,8 +145,8 @@ static int gatt_access_rx(uint16_t conn_handle, uint16_t attr_handle,
     return 0;
 }
 
-static int gatt_access_tx(uint16_t conn_handle, uint16_t attr_handle,
-                          struct ble_gatt_access_ctxt *ctxt, void *arg)
+int debug_console_gatt_access_tx(uint16_t conn_handle, uint16_t attr_handle,
+                                   struct ble_gatt_access_ctxt *ctxt, void *arg)
 {
     (void)conn_handle; (void)attr_handle; (void)arg;
     return 0;
@@ -219,7 +178,7 @@ void debug_console_notify(const uint8_t *data, size_t len)
             os_mbuf_free_chain(om);
             break;
         }
-        int rc = ble_gatts_notify_custom(g_conn_handle, g_tx_val_handle, om);
+        int rc = ble_gatts_notify_custom(g_conn_handle, dbg_console_tx_handle(), om);
         if (rc != 0) {
             os_mbuf_free_chain(om);
             break;
@@ -274,11 +233,11 @@ static int gap_event(struct ble_gap_event *ev, void *arg)
             static const uint8_t pong[] = "pong\r\n";
             struct os_mbuf *om = ble_hs_mbuf_from_flat(pong, sizeof(pong) - 1);
             if (om) {
-                int rc = ble_gatts_indicate_custom(g_conn_handle, g_tx_val_handle, om);
+                int rc = ble_gatts_indicate_custom(g_conn_handle, dbg_console_tx_handle(), om);
                 if (rc != 0) {
                     os_mbuf_free_chain(om);
                 }
-                ESP_LOGI(TAG, "test indicate rc=%d (tx_handle=%u)", rc, g_tx_val_handle);
+                ESP_LOGI(TAG, "test indicate rc=%d (tx_handle=%u)", rc, dbg_console_tx_handle());
             } else {
                 ESP_LOGE(TAG, "test indicate: mbuf alloc failed");
             }
@@ -328,40 +287,6 @@ static void ensure_host_ready(void)
     }
 }
 
-/* Dynamic GATT service registration (called after host is up, no count_cfg) */
-static int console_register_now(void)
-{
-    if (s_console_registered) {
-        ESP_LOGI(TAG, "Console service already registered; skip");
-        return 0;
-    }
-    
-    /* IMPORTANT: Do NOT call ble_gatts_count_cfg() - invalid for dynamic (post-init) registration */
-    int rc = ble_gatts_add_svcs(kConsoleSvc);
-    ESP_LOGI(TAG, "add_svcs rc=%d", rc);
-    if (rc != 0) {
-        ESP_LOGE(TAG, "add_svcs failed rc=%d", rc);
-        return rc;
-    }
-    
-    rc = ble_gatts_start();
-    ESP_LOGI(TAG, "gatts_start rc=%d", rc);
-    if (rc != 0) {
-        ESP_LOGE(TAG, "gatts_start failed rc=%d", rc);
-        return rc;
-    }
-    
-    ESP_LOGI(TAG, "Handles: RX=%u TX=%u", g_rx_val_handle, g_tx_val_handle);
-    if (g_rx_val_handle == 0 || g_tx_val_handle == 0) {
-        ESP_LOGE(TAG, "Invalid val handles (RX/TX); registration failed");
-        return BLE_HS_EINVAL;
-    }
-    
-    s_console_registered = true;
-    ESP_LOGI(TAG, "Console GATT service registered successfully");
-    return 0;
-}
-
 esp_err_t debug_console_init(void)
 {
     if (s_dbg_inited) {
@@ -371,26 +296,12 @@ esp_err_t debug_console_init(void)
     
     ensure_host_ready();
     
-    /* Configure Security Manager for encryption + bonding + MITM */
     ble_hs_cfg.sm_bonding = 1;
     ble_hs_cfg.sm_mitm = 1;
     ble_hs_cfg.sm_sc = 1;
     ble_hs_cfg.sm_io_cap = BLE_HS_IO_DISPLAY_YESNO;
     
-    /* Optional delay to avoid racing immediately after host is ready */
-    vTaskDelay(pdMS_TO_TICKS(10));
-    
-    /* Register GATT service dynamically (no count_cfg for post-init registration) */
-    int rc = console_register_now();
-    ESP_LOGI(TAG, "console register rc=%d", rc);
-    if (rc != 0) {
-        ESP_LOGE(TAG, "Console GATT registration failed rc=%d", rc);
-        return ESP_FAIL;
-    }
-
-    /* Bring up the bridge (line assembler + vprintf mirror) */
     ESP_RETURN_ON_ERROR(console_bridge_init(), TAG, "bridge init failed");
-    /* Start with logs mirroring OFF; user can enable via 'logs on' */
     console_bridge_set_log_mirror(false);
     
     s_dbg_inited = true;
@@ -401,7 +312,10 @@ esp_err_t debug_console_start_adv(void)
 {
     ensure_host_ready();
     
-    /* Get MAC address for device name suffix */
+    if (dbg_console_adv_guard() != 0) {
+        return ESP_FAIL;
+    }
+    
     uint8_t mac[6];
     esp_efuse_mac_get_default(mac);
     char name[17];
