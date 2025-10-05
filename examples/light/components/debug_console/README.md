@@ -43,6 +43,53 @@ After pairing once:
 2. Reconnect from the same phone
 3. Write to RX should work immediately without re-pairing
 
+## Interactive Console Usage
+
+With `CONFIG_DEBUG_CONSOLE_GATT_INPUT=y`:
+
+### Typing Commands over BLE
+
+1. **Connect and Subscribe**: Follow pairing procedure above
+2. **Type Commands**: After seeing "console online" and prompt `> `, type CHIP shell commands
+   - Example: Type `help` then press Enter (hex: `68 65 6C 70 0D 0A`)
+   - Example: Type `version` then press Enter (hex: `76 65 72 73 69 6F 6E 0D 0A`)
+3. **See Output**: Command output appears over BLE indications/notifications
+4. **Editing**: Backspace/Delete keys work (0x08 or 0x7F), typing >256 chars triggers bell (0x07)
+
+### Available Commands
+
+Common CHIP shell commands that work over BLE:
+- `help` - list all commands
+- `version` - show Matter version
+- `config` - configuration commands
+- Custom commands registered in your application
+
+### Log Tee
+
+With `CONFIG_DEBUG_CONSOLE_GATT_TEE_LOGS=y`:
+- All ESP_LOGI/ESP_LOGW/etc output appears on both UART and BLE
+- Useful for remote debugging without USB connection
+- Non-blocking: heavy logging won't stall the device (uses ring-buffer)
+
+### Configuration Matrix
+
+| Config | Behavior |
+|--------|----------|
+| INPUT=y, TEE_LOGS=y | Full interactive console with log mirror (default) |
+| INPUT=y, TEE_LOGS=n | Interactive console, logs only on UART |
+| INPUT=n, TEE_LOGS=y | No commands, but logs mirrored to BLE |
+| INPUT=n, TEE_LOGS=n | RX ignored, no log tee (minimal mode) |
+
+### Testing Example with nRF Connect
+
+1. **Enable Indications**: Tap ⇅ on TX characteristic (`...9D12`)
+2. **See Greeting**: You should receive "console online\r\n" followed by "> "
+3. **Send Command**: Write to RX characteristic (`...9D11`)
+   - Hex for "help": `68 65 6C 70 0D 0A`
+4. **View Response**: Check TX indications for command output
+5. **Try Backspace**: Send partial command, then backspace (0x08), then complete
+6. **See Logs**: Trigger app events and watch logs appear in TX indications
+
 ## Expected Boot Logs
 
 With `CONFIG_DEBUG_CONSOLE_GATT_ENCRYPTED=y`:

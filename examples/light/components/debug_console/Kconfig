@@ -16,4 +16,28 @@ config DEBUG_CONSOLE_GATT_ENCRYPTED
       Unpaired writes will trigger pairing and be rejected until encryption is established.
       Bonds persist across reboots via NVS storage.
 
+config DEBUG_CONSOLE_GATT_INPUT
+    bool "Enable BLE GATT as console input (CHIP shell)"
+    depends on DEBUG_CONSOLE_GATT
+    default y
+    help
+      When enabled, BLE GATT RX writes are processed as CHIP shell commands.
+      Commands are executed with the same mutex as UART to prevent conflicts.
+
+config DEBUG_CONSOLE_GATT_TEE_LOGS
+    bool "Tee ESP logs/printf to BLE console"
+    depends on DEBUG_CONSOLE_GATT
+    default y
+    help
+      When enabled, ESP_LOG* output is mirrored to BLE console TX in addition to UART.
+      Uses non-blocking ring-buffer to prevent BLE from slowing down logging.
+
+config DEBUG_CONSOLE_GATT_APPEND_CRLF
+    bool "Append CRLF on newline for BLE console"
+    depends on DEBUG_CONSOLE_GATT
+    default y
+    help
+      When enabled, appends both CR and LF on newline for better BLE terminal compatibility.
+      Disable to send only LF (Unix-style).
+
 endmenu
