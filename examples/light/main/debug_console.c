@@ -95,14 +95,14 @@ static const struct ble_gatt_svc_def g_svcs[] = {
             {
                 .uuid = &UUID_RX.u,
                 .access_cb = gatt_access_rx,
-                .flags = BLE_GATT_CHR_F_WRITE | BLE_GATT_CHR_F_WRITE_NO_RSP | BLE_GATT_CHR_F_WRITE_ENC,
+                .flags = BLE_GATT_CHR_F_WRITE | BLE_GATT_CHR_F_WRITE_NO_RSP,
                 .val_handle = &g_rx_val_handle,
             },
             {
                 .uuid = &UUID_TX.u,
                 .access_cb = gatt_access_tx,
                 .val_handle = &g_tx_val_handle,
-                .flags = BLE_GATT_CHR_F_NOTIFY | BLE_GATT_CHR_F_INDICATE | BLE_GATT_CHR_F_READ_ENC,
+                .flags = BLE_GATT_CHR_F_READ | BLE_GATT_CHR_F_INDICATE,
             },
             {0}
         },
@@ -342,8 +342,15 @@ esp_err_t debug_console_init(void)
     int rc = 0;
     rc = ble_gatts_count_cfg(g_svcs);    
     ESP_RETURN_ON_FALSE(rc==0, ESP_FAIL, TAG, "count_cfg=%d", rc);
-    rc = ble_gatts_add_svcs(g_svcs);     
-    ESP_RETURN_ON_FALSE(rc==0, ESP_FAIL, TAG, "add_svcs=%d", rc);
+    
+    rc = ble_gatts_add_svcs(g_svcs);
+    ESP_LOGI(TAG, "add_svcs rc=%d", rc);
+    ESP_RETURN_ON_FALSE(rc==0, ESP_FAIL, TAG, "add_svcs failed");
+    
+    rc = ble_gatts_start();
+    ESP_LOGI(TAG, "gatts_start rc=%d", rc);
+    ESP_RETURN_ON_FALSE(rc==0, ESP_FAIL, TAG, "gatts_start failed");
+    
     ESP_LOGI(TAG, "Handles: RX=%u TX=%u", g_rx_val_handle, g_tx_val_handle);
 
     /* Bring up the bridge (line assembler + vprintf mirror) */
