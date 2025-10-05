@@ -107,6 +107,7 @@ int debug_console_gatt_access_rx(uint16_t conn_handle, uint16_t attr_handle,
     ESP_LOGI(TAG, "ASCII: \"%s\"", asc);
     
     /* Enforce encryption (and, by default, bonding) on RX writes */
+#ifdef CONFIG_DEBUG_CONSOLE_GATT_ENCRYPTED
     if (!g_encrypted) {
         ESP_LOGW(TAG, "RX write rejected: not encrypted");
         return BLE_ATT_ERR_INSUFFICIENT_ENC;
@@ -115,6 +116,7 @@ int debug_console_gatt_access_rx(uint16_t conn_handle, uint16_t attr_handle,
         ESP_LOGW(TAG, "RX write rejected: not bonded (require_bond=%d)", (int)s_require_bond);
         return BLE_ATT_ERR_INSUFFICIENT_AUTHEN;
     }
+#endif
     
     if (g_ind_subscribed) {
         struct os_mbuf *om = ble_hs_mbuf_from_flat(buf, len);
@@ -226,20 +228,21 @@ static int gap_event(struct ble_gap_event *ev, void *arg)
         g_ind_subscribed = ev->subscribe.cur_indicate || ev->subscribe.cur_notify;
         g_notify_enabled = g_ind_subscribed && g_encrypted && (!s_require_bond || g_bonded);
         
-        ESP_LOGI(TAG, "SUBSCRIBE: attr=%u -> ind=%d", ev->subscribe.attr_handle, g_ind_subscribed);
+        ESP_LOGI(TAG, "SUBSCRIBE: attr=%u -> notify=%d indicate=%d", 
+                 ev->subscribe.attr_handle, ev->subscribe.cur_notify, ev->subscribe.cur_indicate);
         
-        /* Send test indication to prove TX path works */
+        /* Send self-test message once TX is subscribed */
         if (g_ind_subscribed) {
-            static const uint8_t pong[] = "pong\r\n";
-            struct os_mbuf *om = ble_hs_mbuf_from_flat(pong, sizeof(pong) - 1);
+            static const uint8_t online[] = "console online\r\n";
+            struct os_mbuf *om = ble_hs_mbuf_from_flat(online, sizeof(online) - 1);
             if (om) {
                 int rc = ble_gatts_indicate_custom(g_conn_handle, dbg_console_tx_handle(), om);
                 if (rc != 0) {
                     os_mbuf_free_chain(om);
                 }
-                ESP_LOGI(TAG, "test indicate rc=%d (tx_handle=%u)", rc, dbg_console_tx_handle());
+                ESP_LOGI(TAG, "self-test indicate rc=%d (tx_handle=%u)", rc, dbg_console_tx_handle());
             } else {
-                ESP_LOGE(TAG, "test indicate: mbuf alloc failed");
+                ESP_LOGE(TAG, "self-test indicate: mbuf alloc failed");
             }
         }
         break;
@@ -255,7 +258,8 @@ static int gap_event(struct ble_gap_event *ev, void *arg)
               g_bonded = false;
           }
         }
-        ESP_LOGI(TAG, "Security: enc=%d bond=%d (require_bond=%d)", (int)g_encrypted, (int)g_bonded, (int)s_require_bond);
+        ESP_LOGI(TAG, "ENC_CHANGE status=%d encrypted=%d bonded=%d", 
+                 ev->enc_change.status, (int)g_encrypted, (int)g_bonded);
         if (!g_encrypted) {
             g_notify_enabled = false;
             g_ind_subscribed = false;
@@ -267,11 +271,21 @@ static int gap_event(struct ble_gap_event *ev, void *arg)
         break;
         
     case BLE_GAP_EVENT_PASSKEY_ACTION:
+#ifdef CONFIG_DEBUG_CONSOLE_GATT_ENCRYPTED
         if (ev->passkey.params.action == BLE_SM_IOACT_DISP) {
             ESP_LOGI(TAG, "=== Passkey: %06lu ===", (unsigned long)ev->passkey.params.numcmp);
             struct ble_sm_io io = {.action = BLE_SM_IOACT_DISP, .passkey = ev->passkey.params.numcmp};
             ble_sm_inject_io(ev->passkey.conn_handle, &io);
+        } else if (ev->passkey.params.action == BLE_SM_IOACT_NUMCMP) {
+            ESP_LOGI(TAG, "Numeric compare: %06lu -> accepting", (unsigned long)ev->passkey.params.numcmp);
+            ble_sm_inject_io(ev->passkey.conn_handle, &(struct ble_sm_io){.action = BLE_SM_IOACT_NUMCMP, .numcmp_accept = 1});
         }
+#endif
+        break;
+        
+    case BLE_GAP_EVENT_NOTIFY_TX:
+        ESP_LOGI(TAG, "NOTIFY_TX status=%d indication=%d",
+                 ev->notify_tx.status, ev->notify_tx.indication);
         break;
         
     default:
@@ -295,11 +309,6 @@ esp_err_t debug_console_init(void)
     }
     
     ensure_host_ready();
-    
-    ble_hs_cfg.sm_bonding = 1;
-    ble_hs_cfg.sm_mitm = 1;
-    ble_hs_cfg.sm_sc = 1;
-    ble_hs_cfg.sm_io_cap = BLE_HS_IO_DISPLAY_YESNO;
     
     ESP_RETURN_ON_ERROR(console_bridge_init(), TAG, "bridge init failed");
     console_bridge_set_log_mirror(false);

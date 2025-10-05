@@ -1,0 +1,19 @@
+menu "Debug Console (GATT)"
+
+config DEBUG_CONSOLE_GATT
+    bool "Enable Debug Console over BLE GATT"
+    default n
+    help
+      Enable the BLE GATT-based debug console for remote shell access.
+      This console uses a custom 128-bit UUID service for RX/TX characteristics.
+
+config DEBUG_CONSOLE_GATT_ENCRYPTED
+    bool "Require pairing (encryption) for Console GATT RX"
+    depends on DEBUG_CONSOLE_GATT
+    default y
+    help
+      When enabled, writes to the console RX characteristic require an encrypted link.
+      Unpaired writes will trigger pairing and be rejected until encryption is established.
+      Bonds persist across reboots via NVS storage.
+
+endmenu
