@@ -42,7 +42,7 @@ CONFIG_MBEDTLS_HKDF_C=y
 
 # === BLE Console feature ===
 CONFIG_BLE_SHELL_DEBUGGING_ENCRYPTED=y
-CONFIG_BLE_CONSOLE_REQUIRE_BOND=y
+CONFIG_BLE_CONSOLE_REQUIRE_BOND=n
 CONFIG_BLE_CONSOLE_RATE_LIMIT=y
 
 # NimBLE sizing (safe defaults for console I/O)
@@ -52,6 +52,11 @@ CONFIG_BT_NIMBLE_MSYS1_BLOCK_COUNT=96
 
 # UART monitor quality-of-life
 CONFIG_ESP_CONSOLE_UART_BAUDRATE=115200
+
+# Reduce logging verbosity
+CONFIG_BOOTLOADER_LOG_LEVEL_WARN=y
+CONFIG_CHIP_LOG_DEFAULT_LEVEL_ERROR=y
+CONFIG_CHIP_CONFIG_IM_PRETTY_PRINT=n
 
 # Increase LwIP IPv6 address number to 6 (MAX_FABRIC + 1)
 # unique local addresses for fabrics(MAX_FABRIC), a link local address(1)
