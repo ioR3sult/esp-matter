@@ -1,4 +1,6 @@
 #include "console_gatt.h"
+#include "console_state.h"
+#include "sdkconfig.h"
 #include "esp_log.h"
 #include "nimble/ble.h"
 #include "host/ble_gatt.h"
@@ -47,12 +49,17 @@ const struct ble_gatt_svc_def * dbg_console_get_service_defs(void) {
 
 void dbg_console_mark_registered(bool ok) {
     s_console_registered = ok && g_rx_val_handle && g_tx_val_handle;
+    
+    console_state()->tx_val_handle = g_tx_val_handle;
+    
     ESP_LOGI(TAG, "Console GATT registered=%d RX=%u TX=%u",
              s_console_registered, g_rx_val_handle, g_tx_val_handle);
     if (!s_console_registered) {
         ESP_LOGE(TAG, "Console registration invalid; advertising will be blocked.");
     } else {
         ESP_LOGI(TAG, "TX_MODE=Notify (build-time)");
+        ESP_LOGI(TAG, "INPUT=%d TEE_LOGS=%d",
+                 (int)CONFIG_DEBUG_CONSOLE_GATT_INPUT, (int)CONFIG_DEBUG_CONSOLE_GATT_TEE_LOGS);
     }
 }
 
