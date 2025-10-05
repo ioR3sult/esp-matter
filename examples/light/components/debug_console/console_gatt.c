@@ -31,11 +31,7 @@ static const struct ble_gatt_chr_def kConsoleChrs[] = {
 #endif
       .val_handle=&g_rx_val_handle },
     { .uuid=&UUID_TX.u, .access_cb=debug_console_gatt_access_tx,
-#ifdef CONFIG_DEBUG_CONSOLE_GATT_TX_NOTIFY
       .flags=BLE_GATT_CHR_F_READ | BLE_GATT_CHR_F_NOTIFY,
-#else
-      .flags=BLE_GATT_CHR_F_READ | BLE_GATT_CHR_F_INDICATE,
-#endif
       .val_handle=&g_tx_val_handle },
     { 0 }
 };
@@ -55,6 +51,8 @@ void dbg_console_mark_registered(bool ok) {
              s_console_registered, g_rx_val_handle, g_tx_val_handle);
     if (!s_console_registered) {
         ESP_LOGE(TAG, "Console registration invalid; advertising will be blocked.");
+    } else {
+        ESP_LOGI(TAG, "TX_MODE=Notify (build-time)");
     }
 }
 
