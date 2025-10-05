@@ -40,4 +40,13 @@ config DEBUG_CONSOLE_GATT_APPEND_CRLF
       When enabled, appends both CR and LF on newline for better BLE terminal compatibility.
       Disable to send only LF (Unix-style).
 
+config DEBUG_CONSOLE_GATT_TX_NOTIFY
+    bool "Use Notify (not Indicate) for BLE console TX"
+    depends on DEBUG_CONSOLE_GATT
+    default y
+    help
+      When enabled, TX characteristic uses Notify instead of Indicate.
+      Notify is faster and eliminates "NOTIFY_TX status=14" confirmation overhead.
+      Disable to use Indicate mode (slower but with ACK confirmation).
+
 endmenu

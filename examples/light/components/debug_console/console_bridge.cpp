@@ -121,7 +121,11 @@ extern "C" void ble_console_on_subscribed(void) {
 
 extern "C" void console_bridge_feed_rx(const uint8_t *data, size_t len) {
 #if !CONFIG_DEBUG_CONSOLE_GATT_INPUT
-    ESP_LOGW(TAG, "BLE console input disabled (CONFIG_DEBUG_CONSOLE_GATT_INPUT=n)");
+    static bool warned = false;
+    if (!warned) {
+        ESP_LOGW(TAG, "BLE console input disabled (CONFIG_DEBUG_CONSOLE_GATT_INPUT=n)");
+        warned = true;
+    }
     return;
 #endif
 
