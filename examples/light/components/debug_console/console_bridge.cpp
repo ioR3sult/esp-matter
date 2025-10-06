@@ -9,6 +9,7 @@
 #include <stdio.h>
 
 extern "C" void debug_console_notify(const uint8_t *data, size_t len);
+extern "C" void register_console_selftest(void);
 
 static const char *TAG = "console_bridge";
 static SemaphoreHandle_t s_console_mutex = NULL;
@@ -102,6 +103,9 @@ extern "C" esp_err_t console_bridge_init(void) {
     }
 
     ESP_LOGI(TAG, "Console bridge initialized (CHIP shell already running)");
+    
+    register_console_selftest();
+    
     return ESP_OK;
 }
 

@@ -14,6 +14,7 @@
 #include "debug_console.h"
 #include "console_gatt.h"
 #include "console_bridge.h"
+#include "console_state.h"
 
 static const char *TAG = "dbg_console";
 
@@ -129,7 +130,7 @@ int debug_console_gatt_access_rx(uint16_t conn_handle, uint16_t attr_handle,
         } else {
             ESP_LOGE(TAG, "echo: mbuf alloc failed");
         }
-    } else {
+    } else if (!console_state()->notify_enabled) {
         ESP_LOGW(TAG, "no subscriber; skipping echo");
     }
     
@@ -197,6 +198,8 @@ static int gap_event(struct ble_gap_event *ev, void *arg)
     case BLE_GAP_EVENT_CONNECT:
         if (ev->connect.status == 0) {
             g_conn_handle = ev->connect.conn_handle;
+            console_state()->conn_handle = g_conn_handle;
+            
             ESP_LOGI(TAG, "CONNECT status=%d handle=%d", ev->connect.status, g_conn_handle);
             /* Query current security state and cache encryption flag */
             struct ble_gap_conn_desc d;
@@ -217,6 +220,8 @@ static int gap_event(struct ble_gap_event *ev, void *arg)
     case BLE_GAP_EVENT_DISCONNECT:
         ESP_LOGI(TAG, "DISCONNECT reason=0x%02X", ev->disconnect.reason);
         g_conn_handle = BLE_HS_CONN_HANDLE_NONE;
+        console_state()->conn_handle = BLE_HS_CONN_HANDLE_NONE;
+        console_state()->notify_enabled = false;
         g_notify_enabled = false;
         g_encrypted = false;
         g_bonded    = false;
@@ -225,14 +230,15 @@ static int gap_event(struct ble_gap_event *ev, void *arg)
         
     case BLE_GAP_EVENT_SUBSCRIBE:
         {
-            bool prev_notify = g_notify_enabled;
+            bool prev_notify = console_state()->notify_enabled;
             bool subscribed = (ev->subscribe.attr_handle == dbg_console_tx_handle()) && ev->subscribe.cur_notify;
             g_notify_enabled = subscribed && g_encrypted && (!s_require_bond || g_bonded);
+            console_state()->notify_enabled = g_notify_enabled;
             
             ESP_LOGI(TAG, "SUBSCRIBE: attr=%u -> notify=%d indicate=%d", 
                      ev->subscribe.attr_handle, ev->subscribe.cur_notify, ev->subscribe.cur_indicate);
             
-            if (subscribed && !prev_notify) {
+            if (console_state()->notify_enabled && !prev_notify) {
                 ESP_LOGI(TAG, "TX_MODE=Notify (CCCD notify=1)");
             }
             
@@ -241,7 +247,7 @@ static int gap_event(struct ble_gap_event *ev, void *arg)
                 static const uint8_t online[] = "console online\r\n";
                 struct os_mbuf *om = ble_hs_mbuf_from_flat(online, sizeof(online) - 1);
                 if (om) {
-                    int rc = ble_gatts_notify_custom(g_conn_handle, dbg_console_tx_handle(), om);
+                    int rc = ble_gatts_notify_custom(console_state()->conn_handle, dbg_console_tx_handle(), om);
                     if (rc != 0) {
                         os_mbuf_free_chain(om);
                     }
@@ -270,6 +276,7 @@ static int gap_event(struct ble_gap_event *ev, void *arg)
                  ev->enc_change.status, (int)g_encrypted, (int)g_bonded);
         if (!g_encrypted) {
             g_notify_enabled = false;
+            console_state()->notify_enabled = false;
         }
         break;
         
